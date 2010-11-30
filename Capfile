@@ -1,6 +1,7 @@
 ###
-# Upload the expression data, make csv files from xls workbook.
-# make an EBS snapshot. 
+# Do some basic differential expression analysis on the expression data.
+#
+# I AM HERE!
 
 require 'catpaws'
 
@@ -21,8 +22,8 @@ set :group_name, 'ns5_vs_ns5dastro_lumixpn'
 
 set :snap_id, `cat SNAPID`.chomp #ec2 eu-west-1 
 set :vol_id, `cat VOLUMEID`.chomp #empty until you've created a new volume
-set :ebs_size, 1  #Needs to be the size of the snap plus enough space for alignments
-set :availability_zone, 'eu-west-1a'  #wherever the ami is
+set :ebs_size, 5  #give us enough space to generate some analysis data
+set :ebs_zone, 'eu-west-1b'  #wherever the ami is
 set :dev, '/dev/sdf'
 set :mount_point, '/mnt/data'
 
@@ -38,14 +39,25 @@ set :mount_point, '/mnt/data'
 
 
 
-set :datafile, '1738277028_Sample_Probe_Profile_no_normalisation.txt'
+set :xlsfile, 'raw_data_dot_CSV_ver3-same_as_finalreport.xls'
 
-desc "Upload Data"
+
+desc "Upload original xls file"
 task :upload_data, :roles => group_name do
-  upload(datafile, "#{mount_point}/#{datafile}")
+  upload(xlsfile, "#{mount_point}/#{xlsfile}")
 end
 before 'upload_data', 'EC2:start'
 
+
+desc "create csv files from xls file"
+task :make_csv, :roles => group_name do
+  sudo "apt-get -y install libspreadsheet-parseexcel-perl"
+  run "mkdir -p #{working_dir}/scripts"
+  upload "scripts/convert_excel.pl", "#{working_dir}/scripts/convert_excel.pl"
+  run "chmod +x #{working_dir}/scripts/convert_excel.pl"
+  run "cd #{mount_point} && #{working_dir}/scripts/convert_excel.pl #{xlsfile}"
+end
+before 'make_csv', 'EC2:start'
 
 
 #if you want to keep the results

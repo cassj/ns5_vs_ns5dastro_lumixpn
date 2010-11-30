@@ -3,3 +3,6 @@
 *.swp
 *.csv
 *.xls
+*.txt
+first_attempt
+first_attempt/*
