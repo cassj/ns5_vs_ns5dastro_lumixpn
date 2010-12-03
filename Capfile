@@ -1,7 +1,6 @@
 ###
 # Do some basic differential expression analysis on the expression data.
 #
-# I AM HERE!
 
 require 'catpaws'
 
@@ -23,7 +22,7 @@ set :group_name, 'ns5_vs_ns5dastro_lumixpn'
 set :snap_id, `cat SNAPID`.chomp #ec2 eu-west-1 
 set :vol_id, `cat VOLUMEID`.chomp #empty until you've created a new volume
 set :ebs_size, 5  #give us enough space to generate some analysis data
-set :ebs_zone, 'eu-west-1b'  #wherever the ami is
+set :availability_zone, 'eu-west-1a'  #wherever the ami is
 set :dev, '/dev/sdf'
 set :mount_point, '/mnt/data'
 
@@ -39,25 +38,67 @@ set :mount_point, '/mnt/data'
 
 
 
-set :xlsfile, 'raw_data_dot_CSV_ver3-same_as_finalreport.xls'
-
-
-desc "Upload original xls file"
-task :upload_data, :roles => group_name do
-  upload(xlsfile, "#{mount_point}/#{xlsfile}")
+desc "install R on all running instances in group group_name"
+task :install_r, :roles  => group_name do
+  user = variables[:ssh_options][:user]
+  sudo 'apt-get update'
+  sudo 'apt-get -y install r-base'
+  sudo 'apt-get -y install build-essential libxml2 libxml2-dev libcurl3 libcurl4-openssl-dev'
+  upload("scripts/R_setup.R", "#{working_dir}/R_setup.R")
+  run "cd #{working_dir} && chmod +x R_setup.R"
+  sudo "Rscript #{working_dir}/R_setup.R"
 end
-before 'upload_data', 'EC2:start'
+before "install_r", "EC2:start"
+  
 
 
-desc "create csv files from xls file"
-task :make_csv, :roles => group_name do
-  sudo "apt-get -y install libspreadsheet-parseexcel-perl"
+desc "run pre-processing on expression data"
+task :pp_expression_data, :roles => group_name do
   run "mkdir -p #{working_dir}/scripts"
-  upload "scripts/convert_excel.pl", "#{working_dir}/scripts/convert_excel.pl"
-  run "chmod +x #{working_dir}/scripts/convert_excel.pl"
-  run "cd #{mount_point} && #{working_dir}/scripts/convert_excel.pl #{xlsfile}"
+  upload "scripts/limma_xpn.R", "#{working_dir}/scripts/limma_xpn.R"
+  run "chmod +x #{working_dir}/scripts/limma_xpn.R"
+  run "cd #{mount_point} && Rscript #{working_dir}/scripts/limma_xpn.R #{mount_point}/1738277028_Sample_Probe_Profile_no_normalisation.txt #{mount_point}/limma_results.csv"
 end
-before 'make_csv', 'EC2:start'
+before "pp_expression_data", "EC2:start"
+
+
+desc "run QC checks on the pre-processed quality control"
+task "pp_qc_expression_data", :roles => group_name do
+  puts "TODO"
+end  
+before "pp_qc_exprssion_data", "EC2:start"
+
+
+desc "Fetch ReMoat data which has mm9 probe positions"
+task :get_remoat_anno, :roles => group_name do
+  sudo "apt-get -y install unzip"
+  run "mkdir -p #{working_dir}/lib"
+  run "rm -Rf  #{working_dir}/lib/Annotation_Illumina_Mouse*"
+  run "cd #{working_dir}/lib && curl http://www.compbio.group.cam.ac.uk/Resources/Annotation/final/Annotation_Illumina_Mouse-WG-V1_mm9_V1.0.0_Aug09.zip > Annotation_Illumina_Mouse-WG-V1_mm9_V1.0.0_Aug09.zip "
+  run "cd #{working_dir}/lib && unzip Annotation_Illumina_Mouse-WG-V1_mm9_V1.0.0_Aug09.zip"
+end
+before 'get_remoat_anno', 'EC2:start'
+
+
+
+desc "Make an IRanges RangedData object from expression data"
+task :xpn2rd, :roles => group_name do
+  user = variables[:ssh_options][:user]
+  run "mkdir -p #{working_dir}/scripts"
+  upload("scripts/xpn_csv_to_iranges.R", "#{working_dir}/scripts/xpn_csv_to_iranges.R")
+  run "cd #{working_dir}/scripts && chmod +x xpn_csv_to_iranges.R"
+  run "Rscript #{working_dir}/scripts/xpn_csv_to_iranges.R #{mount_point}/limma_results.csv #{working_dir}/lib/Annotation_Illumina_Mouse-WG-V1_mm9_V1.0.0_Aug09.txt"
+
+end
+before "xpn2rd","EC2:start"
+
+
+desc "Fetch expression data results"
+task :get_xpn, :roles=> group_name do
+  `mkdir -p results`
+  download("#{mount_point}/limma_rd.csv", "results/limma_rd.csv")
+end
+before "get_xpn", "EC2:start"
 
 
 #if you want to keep the results
